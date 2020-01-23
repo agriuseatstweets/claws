@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 	"time"
-	"encoding/json"
 	"strconv"
 	"net/url"
 	"net/http"
@@ -30,16 +29,16 @@ func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan 
 			if err != nil {
 				switch httpResponse.StatusCode {
 
-				// Twitter rate limits, so sleep until limit resets	
-				case 429: 
+				// Twitter rate limits, so sleep until limit resets
+				case 429:
 					_, reset := parseRateLimiting(httpResponse)
 					log.Printf("Sleeping: %v\n", reset)
 					time.Sleep(reset + time.Second)
 					continue
-					
+
 				default:
 					errs <- err
-					continue // return or continue here? 
+					continue // return or continue here?
 				}
 			}
 
@@ -57,7 +56,7 @@ func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan 
 
 			mx, _ := strconv.ParseInt(v[0], 10, 64)
 			params.MaxID = mx
-		}		
+		}
 	}()
 
 	return ch
@@ -65,33 +64,15 @@ func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan 
 
 func getTwitterClient() *twitter.Client {
 	config := oauth1.NewConfig(
-		os.Getenv("T_CONSUMER_TOKEN"), 
+		os.Getenv("T_CONSUMER_TOKEN"),
 		os.Getenv("T_CONSUMER_SECRET"))
 
 	token := oauth1.NewToken(
-		os.Getenv("T_ACCESS_TOKEN"), 
+		os.Getenv("T_ACCESS_TOKEN"),
 		os.Getenv("T_TOKEN_SECRET"))
 	httpClient := config.Client(oauth1.NoContext, token)
 
 	return twitter.NewClient(httpClient)
-}
-
-
-func prepTweets(tweets chan twitter.Tweet, errs chan error) chan []byte {
-	out := make(chan []byte)
-	go func(){
-		for tw := range tweets {
-			t, err := json.Marshal(tw)
-			
-			if err != nil {
-				errs <- err
-				continue
-			}
-			out <- t
-		}
-		close(out)		
-	}()
-	return out
 }
 
 func addGeocode(params twitter.SearchTweetParams, geocode string) twitter.SearchTweetParams {

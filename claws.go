@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
     "github.com/dghubble/go-twitter/twitter"
 )
 
@@ -10,12 +11,14 @@ func monitor(errs <-chan error) {
 	log.Fatalf("Claws failed with error: %v", e)
 }
 
-func searchAndPublish(client *twitter.Client, params twitter.SearchTweetParams, errs chan error) {
-	log.Printf("Searching query: %v & Searching geocode: %v", params.Query, params.Geocode)	
+func searchAndPublish(writer QueueWriter, client *twitter.Client, params twitter.SearchTweetParams, errs chan error) {
+	log.Printf("Searching query: %v & Searching geocode: %v", params.Query, params.Geocode)
 	tweets := search(client, params, errs)
 	messages := prepTweets(tweets, errs)
-	count := publish(messages, errs)
-	log.Printf("Succesfully published %v tweets.", count)	
+
+	results := writer.Publish(messages, errs)
+
+	log.Printf("Succesfully published %v tweets out of %v sent", results.Written, results.Sent)
 }
 
 func buildParams() []twitter.SearchTweetParams {
@@ -37,14 +40,31 @@ func buildParams() []twitter.SearchTweetParams {
 	return paramsList
 }
 
+func getWriter() (QueueWriter, error) {
+	writer := os.Getenv("CLAWS_QUEUE")
+	switch writer {
+	case "kafka":
+		return NewKafkaWriter()
+	case "pubsub":
+		return NewPubSubWriter()
+	default:
+		panic("Please provide a valid queue!")
+	}
+}
+
 func main() {
-	client := getTwitterClient()	
+	client := getTwitterClient()
+	writer, err := getWriter()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	errs := make(chan error)
 	go monitor(errs)
 
 	params := buildParams()
-	
+
 	for _, p := range params {
-		searchAndPublish(client, p, errs)
+		searchAndPublish(writer, client, p, errs)
 	}
 }

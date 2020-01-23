@@ -7,54 +7,57 @@ import (
 	"cloud.google.com/go/pubsub"
 )
 
+type PubSubWriter struct {
+	Topic *pubsub.Topic
+	Ctx context.Context
+}
 
-func getPubSub() (*pubsub.Topic, context.Context, error){
+func NewPubSubWriter() (PubSubWriter, error){
 	ctx := context.Background()
 	client, err := pubsub.NewClient(ctx, os.Getenv("GOOGLE_PROJECT_ID"))
 
 	if err != nil {
-		return nil, ctx, err
+		return PubSubWriter{nil, ctx}, err
 	}
 
 	name := os.Getenv("CLAWS_TOPIC")
 	log.Printf("Publishing to topic: %v\n", name)
 	topic := client.Topic(name)
-	return topic, ctx, nil
+	return PubSubWriter{topic, ctx}, nil
 }
 
-func publish(messages chan []byte, errs chan error) int {
+func (writer PubSubWriter) Publish(messages chan QueuedTweet, errs chan error) WriteResults {
 	results := make(chan *pubsub.PublishResult)
-	topic, ctx, err := getPubSub()
 
-	if err != nil {
-		errs <- err
-		return 0
-	}
+	topic := writer.Topic
+	ctx := writer.Ctx
 
 	defer topic.Stop()
 
+	sent := 0
 	go func(){
 		for msg := range messages {
+			data := msg.Value
+			attrs := map[string]string{ "id": string(msg.Key) }
 			r := topic.Publish(ctx, &pubsub.Message{
-				Data: msg,
+				Data: data,
+				Attributes: attrs,
 			})
 			results <- r
+			sent++
 		}
 		close(results)
 	}()
 
-	count := 0
-
+	written := 0
 	for r := range results {
-		count++
-		
 		// .Get blocks until response received
 		_, err := r.Get(ctx)
 		if err != nil {
 			errs <- err
 		}
+		written++
 	}
 
-	return count
+	return WriteResults{sent, written}
 }
-

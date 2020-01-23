@@ -22,6 +22,10 @@ github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym
 github.com/cenkalti/backoff v2.1.1+incompatible h1:tKJnvO2kl0zmb/jA5UKAt4VoEVw1qxKWjE/Bpp46npY=
 github.com/cenkalti/backoff v2.1.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=
+github.com/confluentinc/confluent-kafka-go v1.3.0 h1:1gJm/SgUqG01jRYJ1pSZ9GldAhXZ0xrFPKxINlVZ3z0=
+github.com/confluentinc/confluent-kafka-go v1.3.0/go.mod h1:MPUvNqmycSJrQZKGPS6LyLZLJH1hmLKkBmHQgQR7Ma0=
+github.com/confluentinc/confluent-kafka-go-dev v0.0.0-20190802212433-4315eca36bc9 h1:uaqgTfDHSRLCcto4QqLH3z5DaJvJLCSGUL2Pi8NfGA4=
+github.com/confluentinc/confluent-kafka-go-dev v0.0.0-20190802212433-4315eca36bc9/go.mod h1:MUrc101nfomW+4pCJKUAiWFsmUTfFwMnXpBxFd6gEqk=
 github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dghubble/go-twitter v0.0.0-20190719072343-39e5462e111f h1:M2wB039zeS1/LZtN/3A7tWyfctiOBL4ty5PURBmDdWU=
