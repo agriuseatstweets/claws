@@ -18,6 +18,34 @@ func parseRateLimiting(resp *http.Response) (int, time.Duration) {
 	return remaining, time.Duration(untilReset) * time.Second
 }
 
+func handleErrors(err error, httpResponse *http.Response, errs chan error) {
+	switch err.(type) {
+	case twitter.APIError:
+
+		// could use err.Errors[0].Code, but this seems simpler for now
+		switch httpResponse.StatusCode {
+
+		// Twitter rate limits, so sleep until limit resets	
+		case 429: 
+			_, reset := parseRateLimiting(httpResponse)
+			log.Printf("Sleeping: %v\n", reset)
+			time.Sleep(reset + time.Second)
+			return
+			
+		default:
+			errs <- err
+			return
+		}
+
+	default:
+		// HTTP Error from sling. Retry and hope connection improves.
+		sleeping := 30 * time.Second
+		log.Printf("HTTP Error. Sleeping %v seconds. Error: \n%v\n", sleeping, err)
+		time.Sleep(sleeping)
+		return
+	}
+}
+
 func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan error) (chan twitter.Tweet) {
 
 	ch := make(chan twitter.Tweet)
@@ -27,19 +55,8 @@ func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan 
 			search, httpResponse, err := client.Search.Tweets(&params)
 
 			if err != nil {
-				switch httpResponse.StatusCode {
-
-				// Twitter rate limits, so sleep until limit resets
-				case 429:
-					_, reset := parseRateLimiting(httpResponse)
-					log.Printf("Sleeping: %v\n", reset)
-					time.Sleep(reset + time.Second)
-					continue
-
-				default:
-					errs <- err
-					continue // return or continue here?
-				}
+				handleErrors(err, httpResponse, errs)
+				continue
 			}
 
 			for _, tw := range search.Statuses {
