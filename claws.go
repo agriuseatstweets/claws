@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
     "github.com/dghubble/go-twitter/twitter"
+    "github.com/agriuseatstweets/go-pubbers/pubbers"
 )
 
 func monitor(errs <-chan error) {
@@ -11,11 +12,10 @@ func monitor(errs <-chan error) {
 	log.Fatalf("Claws failed with error: %v", e)
 }
 
-func searchAndPublish(writer QueueWriter, client *twitter.Client, params twitter.SearchTweetParams, errs chan error) {
+func searchAndPublish(writer pubbers.QueueWriter, client *twitter.Client, params twitter.SearchTweetParams, errs chan error) {
 	log.Printf("Searching query: %v & Searching geocode: %v", params.Query, params.Geocode)
 	tweets := search(client, params, errs)
 	messages := prepTweets(tweets, errs)
-
 	results := writer.Publish(messages, errs)
 
 	log.Printf("Succesfully published %v tweets out of %v sent", results.Written, results.Sent)
@@ -40,13 +40,13 @@ func buildParams() []twitter.SearchTweetParams {
 	return paramsList
 }
 
-func getWriter() (QueueWriter, error) {
+func getWriter() (pubbers.QueueWriter, error) {
 	writer := os.Getenv("CLAWS_QUEUE")
 	switch writer {
 	case "kafka":
-		return NewKafkaWriter()
+		return pubbers.NewKafkaWriter()
 	case "pubsub":
-		return NewPubSubWriter()
+		return pubbers.NewPubSubWriter()
 	default:
 		panic("Please provide a valid queue!")
 	}
