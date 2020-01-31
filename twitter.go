@@ -66,6 +66,9 @@ func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan 
 
 	ch := make(chan twitter.Tweet)
 
+	until, _ := time.Parse("2006-01-02", params.Until)
+	since := until.AddDate(0,0,-1)
+
 	go func() {
 		i := 0
 		for {
@@ -76,29 +79,37 @@ func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan 
 				continue
 			}
 
-			// Informational Logging
-			if len(search.Statuses) > 0 && i % 100 == 0 {
-				log.Printf("Got tweets around the time: %v", search.Statuses[0].CreatedAt)
-			}
-			i++
-
 			// Publish
+			finished := false
 			for _, tw := range search.Statuses {
 				ch <- tw
+
+				c, err := tw.CreatedAtTime()
+				if err == nil && c.Before(since) {
+					finished = true
+				}
 			}
 
 			// Get next "max_id" to set in params
 			// this is Twitter's form of pagination
 			nextUrl, _ := url.Parse(search.Metadata.NextResults)
-
 			v, ok := nextUrl.Query()["max_id"]
-			if ok == false {
+
+			// break when we run out of tweets or
+			// we reach our limit
+			if finished || ok == false {
 				close(ch)
 				break
 			}
 
 			mx, _ := strconv.ParseInt(v[0], 10, 64)
 			params.MaxID = mx
+
+			// Informational Logging
+			if i % 100 == 0 {
+				log.Printf("Got tweets around the time: %v", search.Statuses[0].CreatedAt)
+			}
+			i++
 		}
 	}()
 
@@ -111,14 +122,20 @@ func prepTweets(tweets chan twitter.Tweet, errs chan error) chan pubbers.QueuedM
 	out := make(chan pubbers.QueuedMessage)
 	go func(){
 		for tw := range tweets {
-			id := []byte(tw.IDStr)
+			created, err := tw.CreatedAtTime()
+			if err != nil {
+				errs <- err
+				continue
+			}
+
+			key := []byte(created.Format("2006-01-02"))
 			t, err := json.Marshal(tw)
 
 			if err != nil {
 				errs <- err
 				continue
 			}
-			out <- pubbers.QueuedMessage{id, t}
+			out <- pubbers.QueuedMessage{key, t}
 		}
 		close(out)
 	}()
