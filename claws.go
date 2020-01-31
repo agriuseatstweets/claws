@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"time"
     "github.com/dghubble/go-twitter/twitter"
     "github.com/agriuseatstweets/go-pubbers/pubbers"
 )
@@ -21,12 +22,19 @@ func searchAndPublish(writer pubbers.QueueWriter, client *twitter.Client, params
 	log.Printf("Succesfully published %v tweets out of %v sent", results.Written, results.Sent)
 }
 
+func buildUntil(days int) string {
+	t := time.Now()
+	t = t.AddDate(0,0,days)
+	return t.Format("2006-01-02")
+}
+
 func buildParams() []twitter.SearchTweetParams {
 	var paramsList []twitter.SearchTweetParams
 
 	params := twitter.SearchTweetParams{
 		Count: 100,
 		TweetMode: "extended",
+		Until: buildUntil(-5), // until 5 days ago...
 	}
 
 	locations := getLocations()

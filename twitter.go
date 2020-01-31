@@ -9,21 +9,21 @@ import (
 	"net/url"
 	"net/http"
     "github.com/dghubble/go-twitter/twitter"
-    "github.com/dghubble/oauth1"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
     "github.com/agriuseatstweets/go-pubbers/pubbers"
 )
 
 
 func getTwitterClient() *twitter.Client {
-	config := oauth1.NewConfig(
-		os.Getenv("T_CONSUMER_TOKEN"),
-		os.Getenv("T_CONSUMER_SECRET"))
+	// oAuth2 client better for searching
+	config := &clientcredentials.Config{
+		ClientID: os.Getenv("T_CONSUMER_TOKEN"),
+		ClientSecret: os.Getenv("T_CONSUMER_SECRET"),
+		TokenURL: "https://api.twitter.com/oauth2/token",
+	}
 
-	token := oauth1.NewToken(
-		os.Getenv("T_ACCESS_TOKEN"),
-		os.Getenv("T_TOKEN_SECRET"))
-	httpClient := config.Client(oauth1.NoContext, token)
-
+	httpClient := config.Client(oauth2.NoContext)
 	return twitter.NewClient(httpClient)
 }
 
@@ -67,6 +67,7 @@ func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan 
 	ch := make(chan twitter.Tweet)
 
 	go func() {
+		i := 0
 		for {
 			search, httpResponse, err := client.Search.Tweets(&params)
 
@@ -75,10 +76,19 @@ func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan 
 				continue
 			}
 
+			// Informational Logging
+			if len(search.Statuses) > 0 && i % 100 == 0 {
+				log.Printf("Got tweets around the time: %v", search.Statuses[0].CreatedAt)
+			}
+			i++
+
+			// Publish
 			for _, tw := range search.Statuses {
 				ch <- tw
 			}
 
+			// Get next "max_id" to set in params
+			// this is Twitter's form of pagination
 			nextUrl, _ := url.Parse(search.Metadata.NextResults)
 
 			v, ok := nextUrl.Query()["max_id"]
