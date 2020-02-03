@@ -69,6 +69,14 @@ func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan 
 	until, _ := time.Parse("2006-01-02", params.Until)
 	since := until.AddDate(0,0,-1)
 
+	mx, err := getMaxID(since.Format("2006-01-02"))
+	if err != nil {
+		log.Printf("Error getting MaxID: %v", err)		
+	}
+
+	params.MaxID = mx
+	log.Printf("Getting tweets with MaxID: %v", mx)		
+
 	go func() {
 		i := 0
 		for {
