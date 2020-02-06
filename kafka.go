@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"fmt"
 	"time"
 	"encoding/json"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
@@ -71,6 +72,16 @@ func getMaxID (date string) (int64, error) {
 	tw, err := consumer.Consume()
 
 	if err != nil {
+		return 0, err
+	}
+
+	createdAt, err := tw.CreatedAtTime()
+	if err != nil {
+		return 0, err
+	}
+	
+	if createdAt.Format("2006-01-02") != date {
+		err = fmt.Errorf("Latest tweet not the right date for recovering MaxID. Tweet was created at: %v. We are currently searching for tweets from %v", createdAt, date)
 		return 0, err
 	}
 
