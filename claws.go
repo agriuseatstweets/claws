@@ -2,9 +2,9 @@ package main
 
 import (
 	"log"
-	"os"
 	"time"
     "github.com/dghubble/go-twitter/twitter"
+	"github.com/caarlos0/env/v6"
     "github.com/agriuseatstweets/go-pubbers/pubbers"
 )
 
@@ -22,19 +22,14 @@ func searchAndPublish(writer pubbers.QueueWriter, client *twitter.Client, params
 	log.Printf("Succesfully published %v tweets out of %v sent", results.Written, results.Sent)
 }
 
-func buildUntil(days int) string {
-	t := time.Now()
-	t = t.AddDate(0,0,days)
-	return t.Format("2006-01-02")
-}
 
-func buildParams() []twitter.SearchTweetParams {
+func buildParams(until time.Time) []twitter.SearchTweetParams {
 	var paramsList []twitter.SearchTweetParams
 
 	params := twitter.SearchTweetParams{
 		Count: 100,
 		TweetMode: "extended",
-		Until: buildUntil(-5), // until 5 days ago...
+		Until: until.Format("2006-01-02"),
 	}
 
 	locations := getLocations()
@@ -48,21 +43,62 @@ func buildParams() []twitter.SearchTweetParams {
 	return paramsList
 }
 
-func getWriter() (pubbers.QueueWriter, error) {
-	writer := os.Getenv("CLAWS_QUEUE")
-	switch writer {
-	case "kafka":
-		return pubbers.NewKafkaWriter()
-	case "pubsub":
-		return pubbers.NewPubSubWriter()
-	default:
-		panic("Please provide a valid queue!")
-	}
+func getWriter(brokers, topic string) (pubbers.QueueWriter, error) {
+	wc := pubbers.KafkaWriterConfig{brokers, topic}
+	return pubbers.NewKafkaWriter(wc)
 }
 
+
+func buildUntil(days int) time.Time {
+	t := time.Now()
+	t = t.AddDate(0,0,days)
+	return t
+}
+
+func digit(cnf Config, date time.Time, errs chan error) {
+	digs := make(chan pubbers.QueuedMessage)
+
+	go func() {
+		defer close(digs)
+
+		ti := date.Format("2006-01-02")
+		dig := pubbers.QueuedMessage{[]byte(ti), []byte(ti)}
+		digs <- dig
+	}()
+
+	writer, err := getWriter(cnf.KafkaBrokers, cnf.DigTopic)
+	if err != nil {
+		errs <- err
+	}
+
+	writer.Publish(digs, errs)
+	log.Printf("Succesfully published dig report for %v", date)
+}
+
+
+type Config struct {
+	KafkaBrokers string `env:"KAFKA_BROKERS,required"`
+	PubTopic string `env:"PUB_TOPIC,required"`
+	DigTopic string `env:"DIG_TOPIC,required"`
+	Queue string `env:"CLAWS_QUEUE,required"`
+	TwitterToken string `env:"T_CONSUMER_TOKEN,required"`
+	TwitterSecret string `env:"T_CONSUMER_SECRET,required"`
+}
+
+func getConfig() Config {
+	cfg := Config{}
+	if err := env.Parse(&cfg); err != nil {
+		panic(err)
+	}
+	return cfg
+}
+
+
 func main() {
-	client := getTwitterClient()
-	writer, err := getWriter()
+	cnf := getConfig()
+	client := getTwitterClient(cnf.TwitterToken, cnf.TwitterSecret)
+	writer, err := getWriter(cnf.KafkaBrokers, cnf.PubTopic)
+
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -70,9 +106,12 @@ func main() {
 	errs := make(chan error)
 	go monitor(errs)
 
-	params := buildParams()
+	until := buildUntil(-5)
+	params := buildParams(until)
 
 	for _, p := range params {
 		searchAndPublish(writer, client, p, errs)
 	}
+
+	digit(cnf, until.AddDate(0,0,-1), errs)
 }

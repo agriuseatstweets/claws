@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"fmt"
 	"time"
 	"encoding/json"
@@ -13,9 +12,7 @@ type KafkaConsumer struct {
 	Consumer *kafka.Consumer
 }
 
-func NewKafkaConsumer() KafkaConsumer {
-	topic := os.Getenv("PUB_TOPIC")
-	brokers := os.Getenv("KAFKA_BROKERS")
+func NewKafkaConsumer(brokers, topic string) KafkaConsumer {
 
 	c, err := kafka.NewConsumer(&kafka.ConfigMap{
 		"bootstrap.servers": brokers,
@@ -34,8 +31,7 @@ func NewKafkaConsumer() KafkaConsumer {
 }
 
 
-func getOffset( c *kafka.Consumer, date string ) (*kafka.TopicPartition, error) {
-	topic := os.Getenv("PUB_TOPIC")
+func getOffset(c *kafka.Consumer, topic string, date string) (*kafka.TopicPartition, error) {
 	md, err := c.GetMetadata(&topic, false, 10000)
 	if err != nil {
 		return nil, nil
@@ -51,19 +47,20 @@ func getOffset( c *kafka.Consumer, date string ) (*kafka.TopicPartition, error) 
 	if err != nil {
 		return nil, nil
 	}
-	
+
 	if offset > 0 {
 		offset = offset - 1
-	} 
+	}
 	return &kafka.TopicPartition{&topic, partition, kafka.Offset(offset), nil, nil}, nil
 }
 
 
 func getMaxID (date string) (int64, error) {
-	consumer := NewKafkaConsumer()
-	c := consumer.Consumer	
+	cnf := getConfig()
+	consumer := NewKafkaConsumer(cnf.KafkaBrokers, cnf.PubTopic)
+	c := consumer.Consumer
 
-	tp, err := getOffset(c, date)
+	tp, err := getOffset(c, cnf.PubTopic, date)
 	if err != nil {
 		return 0, err
 	}
@@ -79,7 +76,7 @@ func getMaxID (date string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	if createdAt.Format("2006-01-02") != date {
 		err = fmt.Errorf("Latest tweet not the right date for recovering MaxID. Tweet was created at: %v. We are currently searching for tweets from %v", createdAt, date)
 		return 0, err

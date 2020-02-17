@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"os"
 	"time"
 	"encoding/json"
 	"strconv"
@@ -15,11 +14,11 @@ import (
 )
 
 
-func getTwitterClient() *twitter.Client {
+func getTwitterClient(token, secret string) *twitter.Client {
 	// oAuth2 client better for searching
 	config := &clientcredentials.Config{
-		ClientID: os.Getenv("T_CONSUMER_TOKEN"),
-		ClientSecret: os.Getenv("T_CONSUMER_SECRET"),
+		ClientID: token,
+		ClientSecret: secret,
 		TokenURL: "https://api.twitter.com/oauth2/token",
 	}
 
