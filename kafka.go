@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"time"
+	"log"
 	"encoding/json"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
     "github.com/dghubble/go-twitter/twitter"
@@ -34,7 +35,7 @@ func NewKafkaConsumer(brokers, topic string) KafkaConsumer {
 func getOffset(c *kafka.Consumer, topic string, date string) (*kafka.TopicPartition, error) {
 	md, err := c.GetMetadata(&topic, false, 10000)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 
 	numPartitions := len(md.Topics["tweets"].Partitions)
@@ -45,7 +46,7 @@ func getOffset(c *kafka.Consumer, topic string, date string) (*kafka.TopicPartit
 
 	_, offset, err := c.QueryWatermarkOffsets(topic, partition, 10000)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 
 	if offset > 0 {
@@ -62,8 +63,10 @@ func getMaxID (date string) (int64, error) {
 
 	tp, err := getOffset(c, cnf.PubTopic, date)
 	if err != nil {
+		log.Printf("Reverting to 0 offset. Error getting offset: %v", err)
 		return 0, err
 	}
+
 	c.Assign([]kafka.TopicPartition{*tp})
 
 	tw, err := consumer.Consume()

@@ -13,10 +13,10 @@ func monitor(errs <-chan error) {
 	log.Fatalf("Claws failed with error: %v", e)
 }
 
-func searchAndPublish(writer pubbers.QueueWriter, client *twitter.Client, params twitter.SearchTweetParams, errs chan error) {
+func searchAndPublish(writer pubbers.QueueWriter, cnf Config, params *twitter.SearchTweetParams, errs chan error) {
 	log.Printf("Searching query: %v & Searching geocode: %v", params.Query, params.Geocode)
-	tweets := search(client, params, errs)
-	messages := prepTweets(tweets, errs)
+	tweets := search(cnf, params, errs)
+	messages := prepTweets(tweets, params, errs)
 	results := writer.Publish(messages, errs)
 
 	log.Printf("Succesfully published %v tweets out of %v sent", results.Written, results.Sent)
@@ -83,6 +83,8 @@ type Config struct {
 	Queue string `env:"CLAWS_QUEUE,required"`
 	TwitterToken string `env:"T_CONSUMER_TOKEN,required"`
 	TwitterSecret string `env:"T_CONSUMER_SECRET,required"`
+	TokenBeastLocation string `env:"BEAST_LOCATION,required"`
+	TokenBeastSecret string `env:"BEAST_SECRET,required"`
 }
 
 func getConfig() Config {
@@ -93,10 +95,8 @@ func getConfig() Config {
 	return cfg
 }
 
-
 func main() {
 	cnf := getConfig()
-	client := getTwitterClient(cnf.TwitterToken, cnf.TwitterSecret)
 	writer, err := getWriter(cnf.KafkaBrokers, cnf.PubTopic)
 
 	if err != nil {
@@ -110,7 +110,7 @@ func main() {
 	params := buildParams(until)
 
 	for _, p := range params {
-		searchAndPublish(writer, client, p, errs)
+		searchAndPublish(writer, cnf, &p, errs)
 	}
 
 	digit(cnf, until.AddDate(0,0,-1), errs)

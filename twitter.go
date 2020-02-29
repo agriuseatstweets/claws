@@ -5,26 +5,24 @@ import (
 	"time"
 	"encoding/json"
 	"strconv"
+	"sync"
 	"net/url"
 	"net/http"
     "github.com/dghubble/go-twitter/twitter"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
+    "github.com/dghubble/oauth1"
     "github.com/agriuseatstweets/go-pubbers/pubbers"
 )
 
 
-func getTwitterClient(token, secret string) *twitter.Client {
-	// oAuth2 client better for searching
-	config := &clientcredentials.Config{
-		ClientID: token,
-		ClientSecret: secret,
-		TokenURL: "https://api.twitter.com/oauth2/token",
-	}
 
-	httpClient := config.Client(oauth2.NoContext)
+func getTwitterClient(twitterToken, twitterSecret, userToken, userSecret string) *twitter.Client {
+	config := oauth1.NewConfig(twitterToken, twitterSecret)
+	token := oauth1.NewToken(userToken, userSecret)
+
+	httpClient := config.Client(oauth1.NoContext, token)
 	return twitter.NewClient(httpClient)
 }
+
 
 func ParseRateLimiting(resp *http.Response) (int, time.Duration) {
 	remaining, _ := strconv.Atoi(resp.Header["X-Rate-Limit-Remaining"][0])
@@ -33,7 +31,7 @@ func ParseRateLimiting(resp *http.Response) (int, time.Duration) {
 	return remaining, time.Duration(untilReset) * time.Second
 }
 
-func HandleErrors(err error, httpResponse *http.Response, errs chan error) {
+func HandleErrors(err error, httpResponse *http.Response, errs chan error) (time.Duration, bool) {
 	switch err.(type) {
 	case twitter.APIError:
 
@@ -44,26 +42,146 @@ func HandleErrors(err error, httpResponse *http.Response, errs chan error) {
 		case 429:
 			_, reset := ParseRateLimiting(httpResponse)
 			log.Printf("Sleeping: %v\n", reset)
-			time.Sleep(reset + time.Second)
-			return
+
+			sleeping := reset + time.Second
+			return sleeping, true
 
 		default:
 			errs <- err
-			return
+			return 0, false // won't return
 		}
 
 	default:
 		// HTTP Error from sling. Retry and hope connection improves.
 		sleeping := 30 * time.Second
 		log.Printf("HTTP Error. Sleeping %v seconds. Error: \n%v\n", sleeping, err)
-		time.Sleep(sleeping)
-		return
+		return sleeping, false
 	}
 }
 
-func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan error) (chan twitter.Tweet) {
+
+func HandleSearch(
+	search *twitter.Search,
+	httpResponse *http.Response,
+	err error,
+	mx int64,
+	since time.Time,
+	outch chan twitter.Tweet,
+	idchan chan int64,
+	errs chan error,
+) {
+
+	if err != nil {
+		// no, either break or continue depending on the type of error!
+		sleeping, rateLimit := HandleErrors(err, httpResponse, errs)
+
+		if rateLimit {
+			idchan <- mx
+			time.Sleep(sleeping)
+			return
+		}
+
+		time.Sleep(sleeping)
+		idchan <- mx
+		return
+	}
+
+	// Publish
+	finished := false
+	for _, tw := range search.Statuses {
+		outch <- tw
+
+		c, err := tw.CreatedAtTime()
+		if err == nil && c.Before(since) {
+			finished = true
+			break
+		}
+	}
+
+	// Get next "max_id" to set in params
+	// this is Twitter's form of pagination
+	nextUrl, _ := url.Parse(search.Metadata.NextResults)
+	v, ok := nextUrl.Query()["max_id"]
+
+	// break when we run out of tweets or
+	// we reach our limit
+	if finished || ok == false {
+		close(idchan)
+		return
+	}
+
+	// continue from next max
+	mx, _ = strconv.ParseInt(v[0], 10, 64)
+	idchan <- mx
+	return
+}
+
+
+func searchWorker(
+	client *twitter.Client,
+	params *twitter.SearchTweetParams,
+	errs chan error,
+	idchan chan int64,
+	since time.Time,
+) chan twitter.Tweet {
 
 	ch := make(chan twitter.Tweet)
+
+	go func() {
+		defer close(ch)
+		for mx := range idchan {
+			params.MaxID = mx
+			search, httpResponse, err := client.Search.Tweets(params)
+			HandleSearch(search, httpResponse, err, mx, since, ch, idchan, errs)
+		}
+	}()
+
+	return ch
+}
+
+func merge(cs ...<-chan twitter.Tweet) <-chan twitter.Tweet {
+    var wg sync.WaitGroup
+    out := make(chan twitter.Tweet)
+
+    output := func(c <-chan twitter.Tweet) {
+        for n := range c {
+            out <- n
+        }
+        wg.Done()
+    }
+    wg.Add(len(cs))
+    for _, c := range cs {
+        go output(c)
+    }
+
+    go func() {
+        wg.Wait()
+        close(out)
+    }()
+    return out
+}
+
+func logprog(tweetchan <-chan twitter.Tweet) <-chan twitter.Tweet {
+	ch := make(chan twitter.Tweet)
+
+	go func(){
+		defer close(ch)
+		i := 0
+		for tw := range tweetchan {
+			ch <- tw
+			if i % 18000 == 0 {
+				t, _ := tw.CreatedAtTime()
+				log.Printf("Got tweet from date: %v", t)
+			}
+			i++
+		}
+	}()
+
+	return ch
+}
+
+
+func search(cnf Config, params *twitter.SearchTweetParams, errs chan error) <-chan twitter.Tweet {
 
 	until, _ := time.Parse("2006-01-02", params.Until)
 	log.Printf("Starting search until: %v", until)
@@ -74,61 +192,39 @@ func search(client *twitter.Client, params twitter.SearchTweetParams, errs chan 
 		log.Printf("Error getting MaxID: %v", err)
 	}
 
-	params.MaxID = mx
-	log.Printf("Getting tweets with MaxID: %v", mx)
+	userTokens := getTokens(cnf.TokenBeastLocation, cnf.TokenBeastSecret)
+	outs := []<-chan twitter.Tweet{}
+	idchan := make(chan int64)
 
-	go func() {
-		i := 0
-		for {
-			search, httpResponse, err := client.Search.Tweets(&params)
+	for k, s := range userTokens {
+		client := getTwitterClient(cnf.TwitterToken, cnf.TwitterSecret, k, s)
+		outchan := searchWorker(client, params, errs, idchan, since)
+		outs = append(outs, outchan)
+	}
 
-			if err != nil {
-				HandleErrors(err, httpResponse, errs)
-				continue
-			}
+	// kickoff the process with this maximum tweet id
+	idchan <- mx
+	tweetchan := merge(outs...)
 
-			// Publish
-			finished := false
-			for _, tw := range search.Statuses {
-				ch <- tw
+	return logprog(tweetchan)
+}
 
-				c, err := tw.CreatedAtTime()
-				if err == nil && c.Before(since) {
-					finished = true
-				}
-			}
-
-			// Get next "max_id" to set in params
-			// this is Twitter's form of pagination
-			nextUrl, _ := url.Parse(search.Metadata.NextResults)
-			v, ok := nextUrl.Query()["max_id"]
-
-			// break when we run out of tweets or
-			// we reach our limit
-			if finished || ok == false {
-				close(ch)
-				break
-			}
-
-			mx, _ := strconv.ParseInt(v[0], 10, 64)
-			params.MaxID = mx
-
-			// Informational Logging
-			if i % 100 == 0 {
-				log.Printf("Got tweets around the time: %v", search.Statuses[0].CreatedAt)
-			}
-			i++
-		}
-	}()
-
-	return ch
+type AgriusSearch struct {
+	Geocode string `json:"geocode,omitempty"`
+	// TODO: add hash of whole params
 }
 
 
+type SearchedTweet struct {
+	*twitter.Tweet
+	*AgriusSearch `json:"agrius_search,omitempty"`
+}
 
-func prepTweets(tweets chan twitter.Tweet, errs chan error) chan pubbers.QueuedMessage {
+
+func prepTweets(tweets <-chan twitter.Tweet, params *twitter.SearchTweetParams, errs chan error) chan pubbers.QueuedMessage {
 	out := make(chan pubbers.QueuedMessage)
 	go func(){
+		defer close(out)
 		for tw := range tweets {
 			created, err := tw.CreatedAtTime()
 			if err != nil {
@@ -137,7 +233,8 @@ func prepTweets(tweets chan twitter.Tweet, errs chan error) chan pubbers.QueuedM
 			}
 
 			key := []byte(created.Format("2006-01-02"))
-			t, err := json.Marshal(tw)
+			st := SearchedTweet{&tw, &AgriusSearch{params.Geocode}}
+			t, err := json.Marshal(&st)
 
 			if err != nil {
 				errs <- err
@@ -145,7 +242,6 @@ func prepTweets(tweets chan twitter.Tweet, errs chan error) chan pubbers.QueuedM
 			}
 			out <- pubbers.QueuedMessage{key, t}
 		}
-		close(out)
 	}()
 	return out
 }
