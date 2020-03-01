@@ -161,7 +161,7 @@ func merge(cs ...<-chan twitter.Tweet) <-chan twitter.Tweet {
     return out
 }
 
-func logprog(tweetchan <-chan twitter.Tweet) <-chan twitter.Tweet {
+func logprog(store *Store, params *twitter.SearchTweetParams, tweetchan <-chan twitter.Tweet) <-chan twitter.Tweet {
 	ch := make(chan twitter.Tweet)
 
 	go func(){
@@ -169,6 +169,11 @@ func logprog(tweetchan <-chan twitter.Tweet) <-chan twitter.Tweet {
 		i := 0
 		for tw := range tweetchan {
 			ch <- tw
+
+			if i % 1000 == 0 {
+				store.SetMaxID(params, tw.ID)
+			}
+
 			if i % 18000 == 0 {
 				t, _ := tw.CreatedAtTime()
 				log.Printf("Got tweet from date: %v", t)
@@ -180,14 +185,14 @@ func logprog(tweetchan <-chan twitter.Tweet) <-chan twitter.Tweet {
 	return ch
 }
 
-
-func search(cnf Config, params *twitter.SearchTweetParams, errs chan error) <-chan twitter.Tweet {
+func search(store *Store, cnf Config, params *twitter.SearchTweetParams, errs chan error) <-chan twitter.Tweet {
 
 	until, _ := time.Parse("2006-01-02", params.Until)
 	log.Printf("Starting search until: %v", until)
 
 	since := until.AddDate(0,0,-1)
-	mx, err := getMaxID(since.Format("2006-01-02"))
+
+	mx, err := store.GetMaxID(params)
 	if err != nil {
 		log.Printf("Error getting MaxID: %v", err)
 	}
@@ -206,12 +211,13 @@ func search(cnf Config, params *twitter.SearchTweetParams, errs chan error) <-ch
 	idchan <- mx
 	tweetchan := merge(outs...)
 
-	return logprog(tweetchan)
+	return logprog(store, params, tweetchan)
 }
 
 type AgriusSearch struct {
 	Geocode string `json:"geocode,omitempty"`
-	// TODO: add hash of whole params
+	Query string `json:"q,omitempty"`
+	Until string `json:"until,omitempty"`
 }
 
 
@@ -233,7 +239,7 @@ func prepTweets(tweets <-chan twitter.Tweet, params *twitter.SearchTweetParams, 
 			}
 
 			key := []byte(created.Format("2006-01-02"))
-			st := SearchedTweet{&tw, &AgriusSearch{params.Geocode}}
+			st := SearchedTweet{&tw, &AgriusSearch{params.Geocode, params.Query, params.Until}}
 			t, err := json.Marshal(&st)
 
 			if err != nil {

@@ -13,9 +13,9 @@ func monitor(errs <-chan error) {
 	log.Fatalf("Claws failed with error: %v", e)
 }
 
-func searchAndPublish(writer pubbers.QueueWriter, cnf Config, params *twitter.SearchTweetParams, errs chan error) {
+func searchAndPublish(writer pubbers.QueueWriter, store *Store, cnf Config, params *twitter.SearchTweetParams, errs chan error) {
 	log.Printf("Searching query: %v & Searching geocode: %v", params.Query, params.Geocode)
-	tweets := search(cnf, params, errs)
+	tweets := search(store, cnf, params, errs)
 	messages := prepTweets(tweets, params, errs)
 	results := writer.Publish(messages, errs)
 
@@ -85,6 +85,7 @@ type Config struct {
 	TwitterSecret string `env:"T_CONSUMER_SECRET,required"`
 	TokenBeastLocation string `env:"BEAST_LOCATION,required"`
 	TokenBeastSecret string `env:"BEAST_SECRET,required"`
+	RedisHost string `env:"REDIS_HOST,required"`
 }
 
 func getConfig() Config {
@@ -98,6 +99,7 @@ func getConfig() Config {
 func main() {
 	cnf := getConfig()
 	writer, err := getWriter(cnf.KafkaBrokers, cnf.PubTopic)
+	store := GetStore(cnf.RedisHost)
 
 	if err != nil {
 		log.Fatal(err)
@@ -110,7 +112,7 @@ func main() {
 	params := buildParams(until)
 
 	for _, p := range params {
-		searchAndPublish(writer, cnf, &p, errs)
+		searchAndPublish(writer, store, cnf, &p, errs)
 	}
 
 	digit(cnf, until.AddDate(0,0,-1), errs)
