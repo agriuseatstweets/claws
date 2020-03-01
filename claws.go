@@ -48,8 +48,14 @@ func logprog(store *Store, params *twitter.SearchTweetParams, messages <-chan *k
 }
 
 
-func searchAndPublish(writer pubbers.KafkaWriter, store *Store, cnf Config, params *twitter.SearchTweetParams, errs chan error) {
+func searchAndPublish(store *Store, cnf Config, params *twitter.SearchTweetParams, errs chan error) {
 	log.Printf("Searching query: %v & Searching geocode: %v", params.Query, params.Geocode)
+
+	writer, err := getWriter(cnf.KafkaBrokers, cnf.PubTopic)
+	if err != nil {
+		errs <- err
+	}
+
 	tweets := search(store, cnf, params, errs)
 	messages := prepTweets(tweets, params, errs)
 	outs, results := writer.Publish(messages, errs)
@@ -139,12 +145,7 @@ func getConfig() Config {
 
 func main() {
 	cnf := getConfig()
-	writer, err := getWriter(cnf.KafkaBrokers, cnf.PubTopic)
 	store := GetStore(cnf.RedisHost)
-
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	errs := make(chan error)
 	go monitor(errs)
@@ -153,7 +154,7 @@ func main() {
 	params := buildParams(until)
 
 	for _, p := range params {
-		searchAndPublish(writer, store, cnf, &p, errs)
+		searchAndPublish(store, cnf, &p, errs)
 	}
 
 	digit(cnf, until.AddDate(0,0,-1), errs)
