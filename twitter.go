@@ -161,29 +161,6 @@ func merge(cs ...<-chan twitter.Tweet) <-chan twitter.Tweet {
     return out
 }
 
-func logprog(store *Store, params *twitter.SearchTweetParams, tweetchan <-chan twitter.Tweet) <-chan twitter.Tweet {
-	ch := make(chan twitter.Tweet)
-
-	go func(){
-		defer close(ch)
-		i := 0
-		for tw := range tweetchan {
-			ch <- tw
-
-			if i % 1000 == 0 {
-				store.SetMaxID(params, tw.ID)
-			}
-
-			if i % 18000 == 0 {
-				t, _ := tw.CreatedAtTime()
-				log.Printf("Got tweet from date: %v", t)
-			}
-			i++
-		}
-	}()
-
-	return ch
-}
 
 func search(store *Store, cnf Config, params *twitter.SearchTweetParams, errs chan error) <-chan twitter.Tweet {
 
@@ -209,9 +186,7 @@ func search(store *Store, cnf Config, params *twitter.SearchTweetParams, errs ch
 
 	// kickoff the process with this maximum tweet id
 	idchan <- mx
-	tweetchan := merge(outs...)
-
-	return logprog(store, params, tweetchan)
+	return merge(outs...)
 }
 
 type AgriusSearch struct {

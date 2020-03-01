@@ -6,6 +6,8 @@ import (
     "github.com/dghubble/go-twitter/twitter"
 	"github.com/caarlos0/env/v6"
     "github.com/agriuseatstweets/go-pubbers/pubbers"
+	"encoding/json"
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
 func monitor(errs <-chan error) {
@@ -13,13 +15,52 @@ func monitor(errs <-chan error) {
 	log.Fatalf("Claws failed with error: %v", e)
 }
 
-func searchAndPublish(writer pubbers.QueueWriter, store *Store, cnf Config, params *twitter.SearchTweetParams, errs chan error) {
+
+func logprog(store *Store, params *twitter.SearchTweetParams, messages <-chan *kafka.Message) <-chan []byte {
+	ch := make(chan []byte)
+
+	go func(){
+		defer close(ch)
+		i := 0
+		for m := range messages {
+			ch <- m.Key
+			if i % 1000 == 0 {
+
+				tweet := new(twitter.Tweet)
+				if err := json.Unmarshal(m.Value, tweet); err != nil {
+					continue
+				}
+
+				// Checkpoint every 1k tweets
+				store.SetMaxID(params, tweet.ID)
+
+				// Log every 18k tweets
+				if i % 18000 == 0 {
+					t, _ := tweet.CreatedAtTime()
+					log.Printf("Got tweet from date: %v", t)
+				}
+			}
+			i++
+		}
+	}()
+
+	return ch
+}
+
+
+func searchAndPublish(writer pubbers.KafkaWriter, store *Store, cnf Config, params *twitter.SearchTweetParams, errs chan error) {
 	log.Printf("Searching query: %v & Searching geocode: %v", params.Query, params.Geocode)
 	tweets := search(store, cnf, params, errs)
 	messages := prepTweets(tweets, params, errs)
-	results := writer.Publish(messages, errs)
+	outs, results := writer.Publish(messages, errs)
+	keys := logprog(store, params, outs)
 
-	log.Printf("Succesfully published %v tweets out of %v sent", results.Written, results.Sent)
+	written := 0
+	for _ = range keys {
+		written++
+	}
+
+	log.Printf("Succesfully published %v tweets out of %v sent", written, results.Sent)
 }
 
 
@@ -43,7 +84,7 @@ func buildParams(until time.Time) []twitter.SearchTweetParams {
 	return paramsList
 }
 
-func getWriter(brokers, topic string) (pubbers.QueueWriter, error) {
+func getWriter(brokers, topic string) (pubbers.KafkaWriter, error) {
 	wc := pubbers.KafkaWriterConfig{brokers, topic}
 	return pubbers.NewKafkaWriter(wc)
 }
