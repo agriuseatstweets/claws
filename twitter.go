@@ -31,6 +31,12 @@ func ParseRateLimiting(resp *http.Response) (int, time.Duration) {
 	return remaining, time.Duration(untilReset) * time.Second
 }
 
+func defaultHandler(err error) (time.Duration, bool) {
+	sleeping := 60 * time.Second
+	log.Printf("Twitter Error. Will retry. Sleeping %v seconds. Error: \n%v\n", sleeping, err)
+	return sleeping, false
+}
+
 func HandleErrors(err error, httpResponse *http.Response, errs chan error) (time.Duration, bool) {
 	switch err.(type) {
 	case twitter.APIError:
@@ -46,16 +52,22 @@ func HandleErrors(err error, httpResponse *http.Response, errs chan error) (time
 			sleeping := reset + time.Second
 			return sleeping, true
 
+		case 500:
+			return defaultHandler(err)
+		case 502:
+			return defaultHandler(err)
+		case 503:
+			return defaultHandler(err)
+		case 504:
+			return defaultHandler(err)
+
 		default:
 			errs <- err
 			return 0, false // won't return
 		}
 
 	default:
-		// HTTP Error from sling. Retry and hope connection improves.
-		sleeping := 30 * time.Second
-		log.Printf("HTTP Error. Sleeping %v seconds. Error: \n%v\n", sleeping, err)
-		return sleeping, false
+		return defaultHandler(err)
 	}
 }
 
