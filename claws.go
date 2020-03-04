@@ -133,6 +133,7 @@ type Config struct {
 	TokenBeastLocation string `env:"BEAST_LOCATION,required"`
 	TokenBeastSecret string `env:"BEAST_SECRET,required"`
 	RedisHost string `env:"REDIS_HOST,required"`
+	DayOffset int `env:"CLAWS_DAY_OFFSET,required"`
 }
 
 func getConfig() Config {
@@ -150,7 +151,7 @@ func main() {
 	errs := make(chan error)
 	go monitor(errs)
 
-	until := buildUntil(-5)
+	until := buildUntil(-cnf.DayOffset)
 	params := buildParams(until)
 
 	for _, p := range params {
