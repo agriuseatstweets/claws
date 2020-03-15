@@ -118,8 +118,14 @@ func digit(cnf Config, date time.Time, errs chan error) {
 		errs <- err
 	}
 
-	writer.Publish(digs, errs)
+	outs, results := writer.Publish(digs, errs)
+
+	for _ = range outs {
+		// block until finished
+	}
+
 	log.Printf("Succesfully published dig report for %v", date)
+	log.Printf("Results of dig channel %v", results.Sent)
 }
 
 
