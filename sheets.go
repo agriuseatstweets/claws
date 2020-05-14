@@ -42,7 +42,7 @@ func getValues(sheet, rng string) []string {
 	res, err := srv.Spreadsheets.Values.Get(sheet, rng).Do()
 
 	if err != nil {
-		log.Fatalf("Unable to get Sheets values: %v", err)
+		log.Fatalf("Unable to get Sheets values.\nSheet: %v\nRange: %v\nError:\n %v", sheet, rng, err)
 	}
 
 	return flattenValues(res)
